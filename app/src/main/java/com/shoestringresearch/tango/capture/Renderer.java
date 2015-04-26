@@ -107,6 +107,9 @@ class Renderer implements GLSurfaceView.Renderer {
       glUniform1i(
               glGetUniformLocation(videoProgram_, "colorTex"),
               0);  // GL_TEXTURE0
+      glUniform1i(
+              glGetUniformLocation(videoProgram_, "cap"),
+              0);
 
       // Get the camera frame dimensions.
       TangoCameraIntrinsics intrinsics = activity_.getTango().getCameraIntrinsics(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
@@ -130,6 +133,7 @@ class Renderer implements GLSurfaceView.Renderer {
 
    @Override
    public void onSurfaceChanged(GL10 gl, int width, int height) {
+      glViewport(0, 0, width, height);
    }
 
    @Override
@@ -137,13 +141,7 @@ class Renderer implements GLSurfaceView.Renderer {
       activity_.updateTexture(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
 
       if (!saveNextFrame_) {
-         glBindFramebuffer(GL_FRAMEBUFFER, 0);
          glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-
-         glUseProgram(videoProgram_);
-         glUniform1i(
-            glGetUniformLocation(videoProgram_, "cap"),
-            0);
 
          glBindBuffer(GL_ARRAY_BUFFER, videoVertexBuffer_);
          glVertexAttribPointer(videoVertexAttribute_, 2, GL_FLOAT, false, 0, 0);
@@ -156,9 +154,12 @@ class Renderer implements GLSurfaceView.Renderer {
       }
       else {
          glBindFramebuffer(GL_FRAMEBUFFER, offscreenBuffer_);
+
+         IntBuffer viewport = IntBuffer.allocate(4);
+         glGetIntegerv(GL_VIEWPORT, viewport);
+         glViewport(0, 0, offscreenWidth_, offscreenHeight_);
          glClear(GL_COLOR_BUFFER_BIT);
 
-         glUseProgram(videoProgram_);
          glUniform1i(
             glGetUniformLocation(videoProgram_, "cap"),
             1);
@@ -176,6 +177,13 @@ class Renderer implements GLSurfaceView.Renderer {
                  .order(ByteOrder.nativeOrder())
                  .asIntBuffer();
          glReadPixels(0, 0, offscreenWidth_, offscreenHeight_, GL_RGBA, GL_UNSIGNED_BYTE, intBuffer.rewind());
+
+         // Restore onscreen state.
+         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+         glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
+         glUniform1i(
+                 glGetUniformLocation(videoProgram_, "cap"),
+                 0);
 
          // Convert to an array for Bitmap.createBitmap().
          int[] pixels = new int[intBuffer.capacity()];
