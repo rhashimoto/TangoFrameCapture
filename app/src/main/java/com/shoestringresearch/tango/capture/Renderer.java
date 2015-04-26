@@ -1,13 +1,15 @@
 package com.shoestringresearch.tango.capture;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.SurfaceTexture;
+import android.net.Uri;
 import android.opengl.GLSurfaceView;
-import android.opengl.Matrix;
 import android.os.Environment;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.google.atap.tangoservice.TangoCameraIntrinsics;
 
@@ -17,7 +19,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
-import java.nio.ShortBuffer;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -29,20 +30,23 @@ class Renderer implements GLSurfaceView.Renderer {
    static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
 
    static final String videoVertexSource =
+      "uniform mediump int cap;\n" +
       "attribute vec4 a_v;\n" +
       "varying vec2 t;\n" +
       "void main() {\n" +
       "	gl_Position = a_v;\n" +
-      "	t = 0.5*vec2(a_v.x, -a_v.y) + vec2(0.5,0.5);\n" +
+      "	t = 0.5*vec2(a_v.x, cap != 0 ? a_v.y : -a_v.y) + vec2(0.5,0.5);\n" +
       "}\n";
 
    static final String videoFragmentSource =
       "#extension GL_OES_EGL_image_external : require\n" +
       "precision mediump float;\n" +
+      "uniform mediump int cap;\n" +
       "varying vec2 t;\n" +
       "uniform samplerExternalOES colorTex;\n" +
       "void main() {\n" +
-      "	gl_FragColor = texture2D(colorTex, t);\n" +
+      "  vec4 c = texture2D(colorTex, t);\n" +
+      "	gl_FragColor = cap != 0 ? c.bgra : c;\n" +
       "}\n";
 
    MainActivity activity_;
@@ -91,16 +95,10 @@ class Renderer implements GLSurfaceView.Renderer {
 
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
-      glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
       // Connect the texture to Tango.
       surfaceTexture_ = new SurfaceTexture(videoTextureName_);
-      activity_.runOnUiThread(new Runnable() {
-         public void run() {
-            activity_.attachTexture(TangoCameraIntrinsics.TANGO_CAMERA_COLOR, videoTextureName_);
-         }
-      });
+      activity_.attachTexture(TangoCameraIntrinsics.TANGO_CAMERA_COLOR, videoTextureName_);
 
       // Prepare the video shader.
       videoProgram_ = createShaderProgram(videoVertexSource, videoFragmentSource);
@@ -110,10 +108,12 @@ class Renderer implements GLSurfaceView.Renderer {
               glGetUniformLocation(videoProgram_, "colorTex"),
               0);  // GL_TEXTURE0
 
+      // Get the camera frame dimensions.
       TangoCameraIntrinsics intrinsics = activity_.getTango().getCameraIntrinsics(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
       offscreenWidth_ = intrinsics.width;
       offscreenHeight_  = intrinsics.height;
 
+      // Create an offscreen render target to capture a frame.
       IntBuffer renderbufferName = IntBuffer.allocate(1);
       glGenRenderbuffers(1, renderbufferName);
       glBindRenderbuffer(GL_RENDERBUFFER, renderbufferName.get(0));
@@ -123,9 +123,6 @@ class Renderer implements GLSurfaceView.Renderer {
       glGenFramebuffers(1, framebufferName);
       glBindFramebuffer(GL_FRAMEBUFFER, framebufferName.get(0));
       glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, renderbufferName.get(0));
-
-      if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-         throw new RuntimeException("framebuffer incomplete");
 
       glBindFramebuffer(GL_FRAMEBUFFER, 0);
       offscreenBuffer_ = framebufferName.get(0);
@@ -144,11 +141,17 @@ class Renderer implements GLSurfaceView.Renderer {
          glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
          glUseProgram(videoProgram_);
+         glUniform1i(
+            glGetUniformLocation(videoProgram_, "cap"),
+            0);
+
          glBindBuffer(GL_ARRAY_BUFFER, videoVertexBuffer_);
          glVertexAttribPointer(videoVertexAttribute_, 2, GL_FLOAT, false, 0, 0);
          glEnableVertexAttribArray(videoVertexAttribute_);
          glActiveTexture(GL_TEXTURE0);
          glBindTexture(GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
+         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
       }
       else {
@@ -156,11 +159,17 @@ class Renderer implements GLSurfaceView.Renderer {
          glClear(GL_COLOR_BUFFER_BIT);
 
          glUseProgram(videoProgram_);
+         glUniform1i(
+            glGetUniformLocation(videoProgram_, "cap"),
+            1);
+
          glBindBuffer(GL_ARRAY_BUFFER, videoVertexBuffer_);
          glVertexAttribPointer(videoVertexAttribute_, 2, GL_FLOAT, false, 0, 0);
          glEnableVertexAttribArray(videoVertexAttribute_);
          glActiveTexture(GL_TEXTURE0);
          glBindTexture(GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
+         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
          IntBuffer intBuffer = ByteBuffer.allocateDirect(offscreenWidth_ * offscreenHeight_ * 4)
@@ -168,31 +177,47 @@ class Renderer implements GLSurfaceView.Renderer {
                  .asIntBuffer();
          glReadPixels(0, 0, offscreenWidth_, offscreenHeight_, GL_RGBA, GL_UNSIGNED_BYTE, intBuffer.rewind());
 
+         // Convert to an array for Bitmap.createBitmap().
          int[] pixels = new int[intBuffer.capacity()];
          intBuffer.rewind();
          intBuffer.get(pixels);
+         saveNextFrame_ = false;
 
          try {
+            // Create/access a pictures subdirectory.
             File directory = new File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                    "Tango Captures");
-            directory.mkdirs();
+               Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+               "Tango Captures");
+            if (!directory.mkdirs() && !directory.isDirectory()) {
+               Toast.makeText(
+                       activity_,
+                       "Could not access save directory",
+                       Toast.LENGTH_SHORT).show();
+               return;
+            }
 
+            // Get the current capture index to construct a unique filename.
             SharedPreferences prefs = activity_.getPreferences(Context.MODE_PRIVATE);
             int index = prefs.getInt("index", 0);
+            SharedPreferences.Editor prefsEditor = prefs.edit();
+            prefsEditor.putInt("index", index + 1);
+            prefsEditor.commit();
 
+            // Create the capture file.
             File file = new File(directory, String.format("tango%05d.png", index));
             FileOutputStream fileOutputStream = new FileOutputStream(file);
 
+            // Bitmap conveniently provides file output.
             Bitmap bitmap = Bitmap.createBitmap(pixels, offscreenWidth_, offscreenHeight_, Bitmap.Config.ARGB_8888);
             bitmap.compress(Bitmap.CompressFormat.PNG, 90, fileOutputStream);
             fileOutputStream.close();
+
+            // Make the new file visible to other apps.
+            activity_.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(file)));
          }
          catch (Exception e) {
             e.printStackTrace();
          }
-
-         saveNextFrame_ = false;
       }
    }
 
