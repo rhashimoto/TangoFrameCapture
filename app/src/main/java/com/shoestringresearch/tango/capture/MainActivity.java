@@ -1,3 +1,4 @@
+// Copyright 2015 Shoestring Research, LLC.  All rights reserved.
 package com.shoestringresearch.tango.capture;
 
 import android.app.Activity;

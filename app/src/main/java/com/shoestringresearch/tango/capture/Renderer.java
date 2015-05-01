@@ -1,3 +1,4 @@
+// Copyright 2015 Shoestring Research, LLC.  All rights reserved.
 package com.shoestringresearch.tango.capture;
 
 import android.content.Context;
@@ -135,8 +136,6 @@ class Renderer implements GLSurfaceView.Renderer {
       activity_.updateTexture(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
 
       if (!saveNextFrame_) {
-         glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-
          glBindBuffer(GL_ARRAY_BUFFER, videoVertexBuffer_);
          glVertexAttribPointer(videoVertexAttribute_, 2, GL_BYTE, false, 0, 0);
          glEnableVertexAttribArray(videoVertexAttribute_);
@@ -147,17 +146,22 @@ class Renderer implements GLSurfaceView.Renderer {
          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
       }
       else {
+         // Switch to the offscreen buffer.
          glBindFramebuffer(GL_FRAMEBUFFER, offscreenBuffer_);
 
+         // Save current viewport and change to offscreen size.
          IntBuffer viewport = IntBuffer.allocate(4);
          glGetIntegerv(GL_VIEWPORT, viewport);
          glViewport(0, 0, offscreenSize_.x, offscreenSize_.y);
-         glClear(GL_COLOR_BUFFER_BIT);
 
+         // Render in capture mode. Setting this flags tells the shader
+         // program to draw the texture right-side up and change the color
+         // order to ARGB for compatibility with Bitmap.
          glUniform1i(
             glGetUniformLocation(videoProgram_, "cap"),
             1);
 
+         // Render.
          glBindBuffer(GL_ARRAY_BUFFER, videoVertexBuffer_);
          glVertexAttribPointer(videoVertexAttribute_, 2, GL_BYTE, false, 0, 0);
          glEnableVertexAttribArray(videoVertexAttribute_);
@@ -167,6 +171,7 @@ class Renderer implements GLSurfaceView.Renderer {
          glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
+         // Read offscreen buffer.
          IntBuffer intBuffer = ByteBuffer.allocateDirect(offscreenSize_.x * offscreenSize_.y * 4)
                  .order(ByteOrder.nativeOrder())
                  .asIntBuffer();
