@@ -5,7 +5,7 @@ import android.content.Intent;
 import android.graphics.Point;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
-import android.os.Looper;
+import android.util.Log;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -41,6 +41,8 @@ public class MainActivity extends Activity
    public void onCreate(Bundle savedInstanceState) {
       super.onCreate(savedInstanceState);
 
+      // Request depth in the Tango config because otherwise frames
+      // are not delivered.
       tango_ = new Tango(this);
       tangoConfig_ = tango_.getConfig(TangoConfig.CONFIG_TYPE_DEFAULT);
       tangoConfig_.putBoolean(TangoConfig.KEY_BOOLEAN_DEPTH, true);
@@ -95,8 +97,12 @@ public class MainActivity extends Activity
       }
    }
 
-   public void attachTexture(final int cameraId, final int textureName) {
+   public synchronized void attachTexture(final int cameraId, final int textureName) {
       if (textureName > 0) {
+         // Link the texture with Tango if the texture changes after
+         // Tango is connected. This generally doesn't happen but
+         // technically could because they happen in separate
+         // threads. Otherwise the link will be made in startTango().
          if (tangoConnected_ && cameraTextures_.get(cameraId) != textureName)
             tango_.connectTextureId(cameraId, textureName);
          cameraTextures_.put(cameraId, textureName);
@@ -141,6 +147,7 @@ public class MainActivity extends Activity
 
    @Override
    public void onTangoEvent(TangoEvent tangoEvent) {
+      Log.i("TangoEvent", String.format("%s: %s", tangoEvent.eventKey, tangoEvent.eventValue));
    }
 
    private void startTango() {
@@ -150,8 +157,10 @@ public class MainActivity extends Activity
          tangoConnected_ = true;
 
          // Attach cameras to textures.
-         for (Map.Entry<Integer, Integer> entry : cameraTextures_.entrySet())
-            tango_.connectTextureId(entry.getKey(), entry.getValue());
+         synchronized(this) {
+            for (Map.Entry<Integer, Integer> entry : cameraTextures_.entrySet())
+               tango_.connectTextureId(entry.getKey(), entry.getValue());
+         }
 
          // Attach Tango listener.
          ArrayList<TangoCoordinateFramePair> framePairs = new ArrayList<>();

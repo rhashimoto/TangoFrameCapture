@@ -5,8 +5,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Point;
-import android.graphics.SurfaceTexture;
 import android.net.Uri;
+import android.opengl.GLES11Ext;
 import android.opengl.GLSurfaceView;
 import android.os.Environment;
 import android.widget.Toast;
@@ -17,18 +17,17 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
+// Need OpenGL ES 3.0 for RGBA8 renderbuffer.
 import static android.opengl.GLES30.*;
 
 class Renderer implements GLSurfaceView.Renderer {
-   // This constant is not yet defined in android.opengl.GLES20.
-   static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
-
+   // Vertex program flips Y when drawing on screen, doesn't flip
+   // when drawing offscreen for saving.
    static final String videoVertexSource =
       "uniform mediump int cap;\n" +
       "attribute vec4 a_v;\n" +
@@ -38,6 +37,8 @@ class Renderer implements GLSurfaceView.Renderer {
       "	t = 0.5*vec2(a_v.x, cap != 0 ? a_v.y : -a_v.y) + vec2(0.5,0.5);\n" +
       "}\n";
 
+   // Fragment buffer reorders color components when drawing offscreen
+   // for saving.
    static final String videoFragmentSource =
       "#extension GL_OES_EGL_image_external : require\n" +
       "precision mediump float;\n" +
@@ -54,9 +55,7 @@ class Renderer implements GLSurfaceView.Renderer {
    int videoProgram_;
    int videoVertexAttribute_;
    int videoVertexBuffer_;
-
    int videoTextureName_;
-   SurfaceTexture surfaceTexture_;
 
    int offscreenBuffer_;
    Point offscreenSize_;
@@ -69,22 +68,22 @@ class Renderer implements GLSurfaceView.Renderer {
 
    @Override
    public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-      glClearColor(0.3f, 1.0f, 0.3f, 1.0f);
-
-      FloatBuffer vBuffer = ByteBuffer.allocateDirect(2*4*4)
-              .order(ByteOrder.nativeOrder())
-              .asFloatBuffer();
-      vBuffer.put(-1.0f);  vBuffer.put(1.0f);
-      vBuffer.put(-1.0f);  vBuffer.put(-1.0f);
-      vBuffer.put(1.0f);   vBuffer.put(1.0f);
-      vBuffer.put(1.0f);   vBuffer.put(-1.0f);
+      glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
 
       IntBuffer bufferNames = IntBuffer.allocate(1);
-      glGenBuffers(2, bufferNames);
+      glGenBuffers(1, bufferNames);
       videoVertexBuffer_ = bufferNames.get(0);
 
+      // Create a bi-unit square geometry.
       glBindBuffer(GL_ARRAY_BUFFER, videoVertexBuffer_);
-      glBufferData(GL_ARRAY_BUFFER, vBuffer.capacity() * 4, vBuffer.position(0), GL_STATIC_DRAW);
+      glBufferData(GL_ARRAY_BUFFER, 8, null, GL_STATIC_DRAW);
+      ((ByteBuffer)glMapBufferRange(
+         GL_ARRAY_BUFFER,
+         0, 8,
+         GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT))
+         .order(ByteOrder.nativeOrder())
+         .put(new byte[] { -1, 1,  -1, -1,  1, 1,  1, -1 });
+      glUnmapBuffer(GL_ARRAY_BUFFER);
 
       // Create the video texture.
       IntBuffer textureNames = IntBuffer.allocate(1);
@@ -92,13 +91,12 @@ class Renderer implements GLSurfaceView.Renderer {
       videoTextureName_ = textureNames.get(0);
 
       glActiveTexture(GL_TEXTURE0);
-      glBindTexture(GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
+      glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
 
       // Connect the texture to Tango.
-      surfaceTexture_ = new SurfaceTexture(videoTextureName_);
       activity_.attachTexture(TangoCameraIntrinsics.TANGO_CAMERA_COLOR, videoTextureName_);
 
-      // Prepare the video shader.
+      // Prepare the shader program.
       videoProgram_ = createShaderProgram(videoVertexSource, videoFragmentSource);
       glUseProgram(videoProgram_);
       videoVertexAttribute_ = glGetAttribLocation(videoProgram_, "a_v");
@@ -140,12 +138,12 @@ class Renderer implements GLSurfaceView.Renderer {
          glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
          glBindBuffer(GL_ARRAY_BUFFER, videoVertexBuffer_);
-         glVertexAttribPointer(videoVertexAttribute_, 2, GL_FLOAT, false, 0, 0);
+         glVertexAttribPointer(videoVertexAttribute_, 2, GL_BYTE, false, 0, 0);
          glEnableVertexAttribArray(videoVertexAttribute_);
          glActiveTexture(GL_TEXTURE0);
-         glBindTexture(GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
-         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+         glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
+         glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+         glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
       }
       else {
@@ -161,12 +159,12 @@ class Renderer implements GLSurfaceView.Renderer {
             1);
 
          glBindBuffer(GL_ARRAY_BUFFER, videoVertexBuffer_);
-         glVertexAttribPointer(videoVertexAttribute_, 2, GL_FLOAT, false, 0, 0);
+         glVertexAttribPointer(videoVertexAttribute_, 2, GL_BYTE, false, 0, 0);
          glEnableVertexAttribArray(videoVertexAttribute_);
          glActiveTexture(GL_TEXTURE0);
-         glBindTexture(GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
-         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+         glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTextureName_);
+         glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+         glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
          IntBuffer intBuffer = ByteBuffer.allocateDirect(offscreenSize_.x * offscreenSize_.y * 4)
