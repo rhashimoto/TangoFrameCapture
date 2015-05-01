@@ -4,11 +4,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.graphics.Point;
 import android.graphics.SurfaceTexture;
 import android.net.Uri;
 import android.opengl.GLSurfaceView;
 import android.os.Environment;
-import android.util.Log;
 import android.widget.Toast;
 
 import com.google.atap.tangoservice.TangoCameraIntrinsics;
@@ -59,8 +59,7 @@ class Renderer implements GLSurfaceView.Renderer {
    SurfaceTexture surfaceTexture_;
 
    int offscreenBuffer_;
-   int offscreenWidth_;
-   int offscreenHeight_;
+   Point offscreenSize_;
 
    volatile boolean saveNextFrame_;
 
@@ -70,8 +69,7 @@ class Renderer implements GLSurfaceView.Renderer {
 
    @Override
    public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-      Log.d("RTH", "onSurfaceCreated");
-      glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
+      glClearColor(0.3f, 1.0f, 0.3f, 1.0f);
 
       FloatBuffer vBuffer = ByteBuffer.allocateDirect(2*4*4)
               .order(ByteOrder.nativeOrder())
@@ -112,15 +110,13 @@ class Renderer implements GLSurfaceView.Renderer {
               0);
 
       // Get the camera frame dimensions.
-      TangoCameraIntrinsics intrinsics = activity_.getTango().getCameraIntrinsics(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
-      offscreenWidth_ = intrinsics.width;
-      offscreenHeight_  = intrinsics.height;
+      offscreenSize_ = activity_.getCameraFrameSize(TangoCameraIntrinsics.TANGO_CAMERA_COLOR);
 
       // Create an offscreen render target to capture a frame.
       IntBuffer renderbufferName = IntBuffer.allocate(1);
       glGenRenderbuffers(1, renderbufferName);
       glBindRenderbuffer(GL_RENDERBUFFER, renderbufferName.get(0));
-      glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, offscreenWidth_, offscreenHeight_);
+      glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, offscreenSize_.x, offscreenSize_.y);
 
       IntBuffer framebufferName = IntBuffer.allocate(1);
       glGenFramebuffers(1, framebufferName);
@@ -157,7 +153,7 @@ class Renderer implements GLSurfaceView.Renderer {
 
          IntBuffer viewport = IntBuffer.allocate(4);
          glGetIntegerv(GL_VIEWPORT, viewport);
-         glViewport(0, 0, offscreenWidth_, offscreenHeight_);
+         glViewport(0, 0, offscreenSize_.x, offscreenSize_.y);
          glClear(GL_COLOR_BUFFER_BIT);
 
          glUniform1i(
@@ -173,10 +169,10 @@ class Renderer implements GLSurfaceView.Renderer {
          glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
          glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-         IntBuffer intBuffer = ByteBuffer.allocateDirect(offscreenWidth_ * offscreenHeight_ * 4)
+         IntBuffer intBuffer = ByteBuffer.allocateDirect(offscreenSize_.x * offscreenSize_.y * 4)
                  .order(ByteOrder.nativeOrder())
                  .asIntBuffer();
-         glReadPixels(0, 0, offscreenWidth_, offscreenHeight_, GL_RGBA, GL_UNSIGNED_BYTE, intBuffer.rewind());
+         glReadPixels(0, 0, offscreenSize_.x, offscreenSize_.y, GL_RGBA, GL_UNSIGNED_BYTE, intBuffer.rewind());
 
          // Restore onscreen state.
          glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -216,7 +212,7 @@ class Renderer implements GLSurfaceView.Renderer {
             FileOutputStream fileOutputStream = new FileOutputStream(file);
 
             // Bitmap conveniently provides file output.
-            Bitmap bitmap = Bitmap.createBitmap(pixels, offscreenWidth_, offscreenHeight_, Bitmap.Config.ARGB_8888);
+            Bitmap bitmap = Bitmap.createBitmap(pixels, offscreenSize_.x, offscreenSize_.y, Bitmap.Config.ARGB_8888);
             bitmap.compress(Bitmap.CompressFormat.PNG, 90, fileOutputStream);
             fileOutputStream.close();
 
