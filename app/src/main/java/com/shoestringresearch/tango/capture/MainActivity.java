@@ -20,6 +20,7 @@ import com.google.atap.tangoservice.TangoErrorException;
 import com.google.atap.tangoservice.TangoEvent;
 import com.google.atap.tangoservice.TangoInvalidException;
 import com.google.atap.tangoservice.TangoOutOfDateException;
+import com.google.atap.tangoservice.TangoPointCloudData;
 import com.google.atap.tangoservice.TangoPoseData;
 import com.google.atap.tangoservice.TangoXyzIjData;
 
@@ -46,7 +47,7 @@ public class MainActivity extends Activity
       // are not delivered.
       tango_ = new Tango(this);
       tangoConfig_ = tango_.getConfig(TangoConfig.CONFIG_TYPE_DEFAULT);
-      tangoConfig_.putBoolean(TangoConfig.KEY_BOOLEAN_DEPTH, true);
+      tangoConfig_.putBoolean(TangoConfig.KEY_BOOLEAN_COLORCAMERA, true);
       cameraTextures_ = new HashMap<>();
 
       // Make full screen.
@@ -131,6 +132,10 @@ public class MainActivity extends Activity
    @Override
    public void onClick(View v) {
       renderer_.saveFrame();
+   }
+
+   @Override
+   public void onPointCloudAvailable(TangoPointCloudData pointCloud) {
    }
 
    @Override
